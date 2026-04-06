@@ -3,19 +3,28 @@ Sample application using Claude Haiku 3.
 This code intentionally contains migration issues for testing the scanner.
 """
 
+import os
 import anthropic
 
 client = anthropic.Anthropic()
 
+PROMPT_DIR = os.path.join(os.path.dirname(__file__), "prompts")
+
+
+def load_prompt(filename: str) -> str:
+    with open(os.path.join(PROMPT_DIR, filename), "r") as f:
+        return f.read().strip()
+
 
 def analyze_document(document: str) -> str:
     """Analyze a document using Claude Haiku 3."""
+    system_prompt = load_prompt("system_prompt.txt")
     response = client.messages.create(
         model="claude-3-haiku-20240307",  # Issue 1: Old model ID
         max_tokens=4096,
         temperature=0.7,
         top_p=0.9,  # Issue 2: Cannot use both temperature and top_p
-        system="You are a document analyzer. Summarize the key points.",
+        system=system_prompt,
         messages=[
             {"role": "user", "content": document}
         ],
@@ -25,9 +34,11 @@ def analyze_document(document: str) -> str:
 
 def run_with_tools(user_message: str) -> str:
     """Run a tool-use workflow."""
+    tool_prompt = load_prompt("tool_use_prompt.txt")
     response = client.messages.create(
         model="claude-3-haiku-20240307",
         max_tokens=4096,
+        system=tool_prompt,
         tools=[
             {
                 "type": "text_editor_20250124",  # Issue 3: Old tool version

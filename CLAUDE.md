@@ -95,7 +95,12 @@ claude-migration-agent/
 └── test-project/               # 테스트용 샘플 코드
     ├── sample_app.py           # Haiku 3 / Sonnet 4 코드
     ├── sample_app_46.py        # Sonnet 4.5 / Opus 4.5 코드
-    └── eval_cases.json         # eval 테스트 케이스 예제
+    ├── eval_cases.json         # eval 테스트 케이스 예제
+    └── prompts/                # 외부 프롬프트 파일 (코드에서 로드)
+        ├── system_prompt.txt       # Haiku 3용 시스템 프롬프트
+        ├── tool_use_prompt.txt     # Haiku 3용 도구 사용 프롬프트
+        ├── agent_system_prompt.txt # Sonnet 4.5용 에이전트 프롬프트 (anti-laziness 포함)
+        └── analysis_prompt.txt     # Sonnet 4.5용 분석 프롬프트 (JSON prefill 패턴)
 ```
 
 ## 개발 진행 상황
@@ -116,6 +121,8 @@ claude-migration-agent/
 - [x] autopilot 모드: scan → fix → eval 자동 반복 (regression 케이스 필수 검증)
 - [x] 리포트 시스템: report/ 디렉토리에 타임스탬프 파일로 저장
 - [x] README 작성 (설치, 사용법, eval_cases.json 작성 가이드, autopilot 전제조건)
+- [x] test-project에 외부 프롬프트 파일 추가 (prompts/ 디렉토리) + .py에서 load_prompt()으로 로드
+- [x] 스캐너 프롬프트에 코드베이스 분석 단계 추가 (API 코드 위치, 프롬프트 인라인/외부 여부 파악)
 
 ### 남은 작업 (다음 세션에서 이어서 할 것)
 

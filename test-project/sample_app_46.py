@@ -3,16 +3,26 @@ Sample application using Claude Sonnet 4.5 / Opus 4.5.
 This code intentionally contains 4.6 migration issues for testing the scanner.
 """
 
+import os
 import anthropic
 
 client = anthropic.Anthropic()
 
+PROMPT_DIR = os.path.join(os.path.dirname(__file__), "prompts")
+
+
+def load_prompt(filename: str) -> str:
+    with open(os.path.join(PROMPT_DIR, filename), "r") as f:
+        return f.read().strip()
+
 
 def analyze_with_prefill(document: str) -> str:
     """Analyze a document with prefilled assistant response."""
+    analysis_prompt = load_prompt("analysis_prompt.txt")
     response = client.messages.create(
         model="claude-sonnet-4-5-20250929",  # Issue: Old model ID for 4.6 target
         max_tokens=4096,
+        system=analysis_prompt,
         messages=[
             {"role": "user", "content": f"Analyze this document: {document}"},
             {"role": "assistant", "content": "{\"analysis\": "},  # Issue: Prefill deprecated in 4.6
@@ -61,15 +71,11 @@ def run_with_output_format(query: str) -> str:
 
 def run_agent_task(task: str) -> str:
     """Run an agentic task with thorough instructions."""
+    agent_prompt = load_prompt("agent_system_prompt.txt")  # Issue: Anti-laziness prompts cause runaway thinking in 4.6
     response = client.messages.create(
         model="claude-sonnet-4-5-20250929",
         max_tokens=16384,
-        system=(
-            "You are a thorough and meticulous assistant. "
-            "Always be as comprehensive as possible. "
-            "Never skip any details. "  # Issue: Anti-laziness prompts cause runaway thinking in 4.6
-            "Think step by step through every aspect."
-        ),
+        system=agent_prompt,
         extra_headers={
             "anthropic-beta": "token-efficient-tools-2025-02-19,output-128k-2025-02-19",  # Issue: Legacy beta headers
         },
