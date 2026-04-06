@@ -1,0 +1,13 @@
+[project]
+name = "claude-migration-agent"
+version = "0.1.0"
+description = "Claude Migration Agent"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel==7.1.0",
+    "jupyter==1.1.1",
+    "claude-agent-sdk==0.1.56",
+    "anthropic==0.89.0",
+    "python-dotenv==1.2.2",
+]
