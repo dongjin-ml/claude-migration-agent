@@ -117,10 +117,23 @@ claude-migration-agent/
 - [x] 리포트 시스템: report/ 디렉토리에 타임스탬프 파일로 저장
 - [x] README 작성 (설치, 사용법, eval_cases.json 작성 가이드, autopilot 전제조건)
 
-### 남은 작업
-- [ ] 모든 모드 테스트 (scan, eval, autopilot, guide 전체 실행 확인)
+### 남은 작업 (다음 세션에서 이어서 할 것)
+
+**우선순위 1: 모든 모드 테스트**
+백그라운드 에이전트가 autopilot 모드를 추가하고 여러 파일을 수정했음.
+모든 모드가 정상 동작하는지 전체 테스트 필요.
+- [ ] scan 모드: `uv run python main.py scan --target haiku-4.5 ./test-project`
+- [ ] eval 모드: `uv run python main.py eval --target haiku-4.5 ./test-project`
+- [ ] autopilot 모드: `uv run python main.py autopilot --target haiku-4.5 ./test-project`
+- [ ] guide 모드: `uv run python main.py guide --target haiku-4.5` (tmux로 테스트)
+- [ ] 다른 타겟으로도 실행 확인 (sonnet-4.6 등)
+- [ ] 문제 발견 시 수정 후 커밋
+
+**우선순위 2: 추가 개선**
 - [ ] guide 모드가 진짜 필요한가? 고민해보기
-- [ ] git 초기화 및 첫 커밋
+
+**완료:**
+- [x] git 초기화 및 첫 커밋 (https://github.com/dongjin-ml/claude-migration-agent)
 
 ## 참고 리소스
 
