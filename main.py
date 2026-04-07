@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import asyncio
 import argparse
@@ -6,6 +7,8 @@ from datetime import datetime
 from dotenv import load_dotenv
 import anthropic
 from claude_agent_sdk import query, ClaudeAgentOptions
+from claude_agent_sdk.types import ResultMessage, StreamEvent
+from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from src.prompts.template import apply_prompt_template
 
 load_dotenv()
@@ -21,6 +24,110 @@ TARGET_TO_SKILL = {
 }
 
 TARGET_MODELS = list(TARGET_TO_SKILL.keys())
+
+class ColoredStreamingCallback(StreamingStdOutCallbackHandler):
+    COLORS = {
+        'blue': '\033[94m',
+        'green': '\033[92m',
+        'yellow': '\033[93m',
+        'red': '\033[91m',
+        'purple': '\033[95m',
+        'cyan': '\033[96m',
+        'white': '\033[97m',
+    }
+
+    def __init__(self, color='blue'):
+        super().__init__()
+        self.color_code = self.COLORS.get(color, '\033[94m')
+        self.reset_code = '\033[0m'
+
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        print(f"{self.color_code}{token}{self.reset_code}", end="", flush=True)
+
+
+TOOL_LABELS = {
+    "Read": "Reading",
+    "Write": "Writing",
+    "Edit": "Editing",
+    "Glob": "Searching files",
+    "Grep": "Searching code",
+    "Bash": "Running command",
+    "Skill": "Loading skill",
+}
+
+
+def _tool_detail(name: str, inp: dict) -> str:
+    if name in ("Read", "Write", "Edit") and "file_path" in inp:
+        return f" {os.path.basename(inp['file_path'])}"
+    elif name == "Bash" and "command" in inp:
+        cmd = inp["command"]
+        if len(cmd) > 60:
+            cmd = cmd[:60] + "..."
+        return f" `{cmd}`"
+    elif name == "Grep" and "pattern" in inp:
+        return f" '{inp['pattern']}'"
+    elif name == "Glob" and "pattern" in inp:
+        return f" {inp['pattern']}"
+    elif name == "Skill" and "skill" in inp:
+        return f" {inp['skill']}"
+    return ""
+
+
+async def stream_query(prompt: str, options: ClaudeAgentOptions) -> str | None:
+    """Run query() with real-time streaming output. Returns the final result text."""
+    options.include_partial_messages = True
+    result_text = None
+    in_text_block = False
+    current_tool_name = None
+    tool_input_json = ""
+
+    callback_text = ColoredStreamingCallback('white')
+    callback_tool = ColoredStreamingCallback('yellow')
+
+    async for msg in query(prompt=prompt, options=options):
+        if isinstance(msg, StreamEvent):
+            event = msg.event
+            etype = event.get("type", "")
+
+            if etype == "content_block_start":
+                block = event.get("content_block", {})
+                if block.get("type") == "tool_use":
+                    if in_text_block:
+                        print(flush=True)
+                        in_text_block = False
+                    current_tool_name = block.get("name", "")
+                    tool_input_json = ""
+                elif block.get("type") == "text":
+                    in_text_block = True
+
+            elif etype == "content_block_delta":
+                delta = event.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    callback_text.on_llm_new_token(delta.get("text", ""))
+                elif delta.get("type") == "input_json_delta" and current_tool_name:
+                    tool_input_json += delta.get("partial_json", "")
+
+            elif etype == "content_block_stop":
+                if current_tool_name:
+                    label = TOOL_LABELS.get(current_tool_name, current_tool_name)
+                    detail = ""
+                    try:
+                        inp = json.loads(tool_input_json)
+                        detail = _tool_detail(current_tool_name, inp)
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+                    callback_tool.on_llm_new_token(f"\n  [tool-use] {label}{detail}\n")
+                    current_tool_name = None
+                    tool_input_json = ""
+                elif in_text_block:
+                    in_text_block = False
+
+        elif isinstance(msg, ResultMessage):
+            if in_text_block:
+                print(flush=True)
+            result_text = msg.result
+
+    return result_text
 
 
 def get_report_path(prefix: str, target_model: str) -> str:
@@ -48,9 +155,7 @@ async def run_scan(target_model: str, project_path: str):
         f"Scan this project for migration issues when upgrading to {target_model}. "
         f"Use the {skill_name} skill for the checklist."
     )
-    async for message in query(prompt=prompt, options=scan_options):
-        if hasattr(message, "result"):
-            print(message.result)
+    await stream_query(prompt=prompt, options=scan_options)
 
     if os.path.exists(report_path):
         print(f"\nReport saved to: {report_path}")
@@ -80,9 +185,7 @@ async def run_scan(target_model: str, project_path: str):
         f"Use the {skill_name} skill for reference. "
         f"Backup each file with _prev suffix before modifying."
     )
-    async for message in query(prompt=fix_command, options=fix_options):
-        if hasattr(message, "result"):
-            print(message.result)
+    await stream_query(prompt=fix_command, options=fix_options)
 
 
 async def run_guide(target_model: str):
@@ -103,9 +206,7 @@ async def run_guide(target_model: str):
         user_input = input("\n> ")
         if user_input.lower() == "exit":
             break
-        async for message in query(prompt=user_input, options=options):
-            if hasattr(message, "result"):
-                print(message.result)
+        await stream_query(prompt=user_input, options=options)
 
 
 async def run_eval(target_model: str, project_path: str):
@@ -178,9 +279,7 @@ async def run_eval(target_model: str, project_path: str):
         f"Results:\n{judge_input}"
     )
 
-    async for message in query(prompt=judge_prompt, options=eval_options):
-        if hasattr(message, "result"):
-            print(message.result)
+    await stream_query(prompt=judge_prompt, options=eval_options)
 
     if os.path.exists(report_path):
         print(f"\nEval report saved to: {report_path}")
@@ -245,12 +344,10 @@ async def run_autopilot(target_model: str, project_path: str, max_iterations: in
             permission_mode="acceptEdits",
             cwd=project_path,
         )
-        async for message in query(
+        await stream_query(
             prompt=f"Scan this project for migration issues when upgrading to {target_model}. Use the {skill_name} skill for the checklist.",
             options=scan_options,
-        ):
-            if hasattr(message, "result"):
-                print(message.result)
+        )
 
         # Step 2: Fix
         print(f"\n[{iteration}/{max_iterations}] Applying fixes...")
@@ -269,9 +366,7 @@ async def run_autopilot(target_model: str, project_path: str, max_iterations: in
             f"Use the {skill_name} skill for reference. "
             f"Backup each file with _prev suffix before modifying."
         )
-        async for message in query(prompt=fix_command, options=fix_options):
-            if hasattr(message, "result"):
-                print(message.result)
+        await stream_query(prompt=fix_command, options=fix_options)
 
         # Step 3: Eval
         print(f"\n[{iteration}/{max_iterations}] Evaluating...")
@@ -327,11 +422,9 @@ async def run_autopilot(target_model: str, project_path: str, max_iterations: in
         )
 
         verdict = "FAIL"
-        async for message in query(prompt=judge_prompt, options=eval_options):
-            if hasattr(message, "result"):
-                print(message.result)
-                if "VERDICT: PASS" in message.result:
-                    verdict = "PASS"
+        result_text = await stream_query(prompt=judge_prompt, options=eval_options)
+        if result_text and "VERDICT: PASS" in result_text:
+            verdict = "PASS"
 
         if verdict == "PASS":
             print(f"\n=== Autopilot Complete (iteration {iteration}/{max_iterations}) ===")

@@ -123,12 +123,21 @@ claude-migration-agent/
 - [x] README 작성 (설치, 사용법, eval_cases.json 작성 가이드, autopilot 전제조건)
 - [x] test-project에 외부 프롬프트 파일 추가 (prompts/ 디렉토리) + .py에서 load_prompt()으로 로드
 - [x] 스캐너 프롬프트에 코드베이스 분석 단계 추가 (API 코드 위치, 프롬프트 인라인/외부 여부 파악)
+- [x] 스트리밍 출력 구현: `stream_query()` 헬퍼 + `include_partial_messages=True`
+- [x] LangChain `ColoredStreamingCallback` 적용 (텍스트=white, 도구=yellow)
+- [x] 도구 호출 시 input 파싱하여 상세 표시 (`[tool-use] Reading sample_app.py` 등)
+- [x] `langchain-core==0.3.63` 의존성 추가
+- [x] git 초기화 및 첫 커밋 (https://github.com/dongjin-ml/claude-migration-agent)
 
 ### 남은 작업 (다음 세션에서 이어서 할 것)
 
-**우선순위 1: 모든 모드 테스트**
-백그라운드 에이전트가 autopilot 모드를 추가하고 여러 파일을 수정했음.
-모든 모드가 정상 동작하는지 전체 테스트 필요.
+**우선순위 1: 출력 메시지 다듬기**
+스트리밍 출력 기본 구조는 완성됨. 실제 실행 결과를 보면서 출력 포맷을 개선해야 함.
+- [ ] 실행해보고 출력 메시지 포맷/가독성 개선 (색상, 줄바꿈, 구분선 등)
+- [ ] 단계별 진행 표시 개선 (scan/fix/eval 각 단계 시작/종료 명확히)
+- [ ] 불필요하거나 중복되는 출력 정리
+
+**우선순위 2: 모든 모드 테스트**
 - [ ] scan 모드: `uv run python main.py scan --target haiku-4.5 ./test-project`
 - [ ] eval 모드: `uv run python main.py eval --target haiku-4.5 ./test-project`
 - [ ] autopilot 모드: `uv run python main.py autopilot --target haiku-4.5 ./test-project`
@@ -136,11 +145,8 @@ claude-migration-agent/
 - [ ] 다른 타겟으로도 실행 확인 (sonnet-4.6 등)
 - [ ] 문제 발견 시 수정 후 커밋
 
-**우선순위 2: 추가 개선**
+**우선순위 3: 추가 개선**
 - [ ] guide 모드가 진짜 필요한가? 고민해보기
-
-**완료:**
-- [x] git 초기화 및 첫 커밋 (https://github.com/dongjin-ml/claude-migration-agent)
 
 ## 참고 리소스
 
