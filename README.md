@@ -36,7 +36,7 @@ Before running, you need:
 **Requirements:** macOS or Linux. Python 3.12 and `uv` are installed automatically by the setup script — you do not need them beforehand.
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/dongjin-ml/claude-migration-agent.git
 cd claude-migration-agent
 cd setup && ./create-uv-env.sh claude-migration-agent && cd ..
 cp .env.example .env
