@@ -92,7 +92,7 @@ claude-migration-agent/
 │   └── migrate-to-opus-46/     # 26개 Item
 │       ├── SKILL.md
 │       └── references/
-└── test-project/               # 테스트용 샘플 코드
+└── customer-project/               # 테스트용 샘플 코드
     ├── sample_app.py           # Haiku 3 / Sonnet 4 코드
     ├── sample_app_46.py        # Sonnet 4.5 / Opus 4.5 코드
     ├── eval_cases.json         # eval 테스트 케이스 예제
@@ -115,13 +115,13 @@ claude-migration-agent/
 - [x] Phase 5: 추가 스킬 3개 (sonnet-45, sonnet-46, opus-46)
 - [x] 공식 문서 + Google Doc 기준 크로스체크 및 보강
 - [x] Phase 6: 각 스킬별 scan 테스트 (4개 타겟 모두 성공)
-- [x] test-project에 4.6 타겟용 샘플 코드 추가
+- [x] customer-project에 4.6 타겟용 샘플 코드 추가
 - [x] 프롬프트 마이그레이션: 각 스킬에 타겟 모델 특성에 맞는 프롬프트 Item 세분화
 - [x] 고객 중심 eval 시스템: eval 커맨드 + eval_cases.json(type 필드) + LLM-as-Judge
 - [x] autopilot 모드: scan → fix → eval 자동 반복 (regression 케이스 필수 검증)
 - [x] 리포트 시스템: report/ 디렉토리에 타임스탬프 파일로 저장
 - [x] README 작성 (설치, 사용법, eval_cases.json 작성 가이드, autopilot 전제조건)
-- [x] test-project에 외부 프롬프트 파일 추가 (prompts/ 디렉토리) + .py에서 load_prompt()으로 로드
+- [x] customer-project에 외부 프롬프트 파일 추가 (prompts/ 디렉토리) + .py에서 load_prompt()으로 로드
 - [x] 스캐너 프롬프트에 코드베이스 분석 단계 추가 (API 코드 위치, 프롬프트 인라인/외부 여부 파악)
 - [x] 스트리밍 출력 구현: `stream_query()` 헬퍼 + `include_partial_messages=True`
 - [x] LangChain `ColoredStreamingCallback` 적용 (텍스트=white, 도구=yellow)
@@ -138,9 +138,9 @@ claude-migration-agent/
 - [ ] 불필요하거나 중복되는 출력 정리
 
 **우선순위 2: 모든 모드 테스트**
-- [ ] scan 모드: `uv run python main.py scan --target haiku-4.5 ./test-project`
-- [ ] eval 모드: `uv run python main.py eval --target haiku-4.5 ./test-project`
-- [ ] autopilot 모드: `uv run python main.py autopilot --target haiku-4.5 ./test-project`
+- [ ] scan 모드: `uv run python main.py scan --target haiku-4.5 ./customer-project`
+- [ ] eval 모드: `uv run python main.py eval --target haiku-4.5 ./customer-project`
+- [ ] autopilot 모드: `uv run python main.py autopilot --target haiku-4.5 ./customer-project`
 - [ ] guide 모드: `uv run python main.py guide --target haiku-4.5` (tmux로 테스트)
 - [ ] 다른 타겟으로도 실행 확인 (sonnet-4.6 등)
 - [ ] 문제 발견 시 수정 후 커밋

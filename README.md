@@ -1,270 +1,227 @@
 # Claude Migration Agent
 
-Claude 모델 마이그레이션을 도와주는 CLI 에이전트입니다.
-타겟 모델만 지정하면 고객 코드를 자동 스캔하고, 마이그레이션 리포트를 생성하고, 코드를 자동 수정해줍니다.
+A CLI that migrates **your application's code and prompts** from an older Claude model to a newer one.
 
-## 지원 타겟 모델
+It does three things end-to-end:
+1. **Scans** your codebase and prompt files for everything that needs to change when upgrading (model IDs, deprecated parameters, tool versions, and — most importantly — prompt patterns that behave differently on the new model).
+2. **Patches** the code and prompts in place, keeping `_prev` backups of every file it touches.
+3. **Evaluates** the migrated result by running your test cases on both the old and new models and grading them with an LLM-as-Judge.
 
-| 타겟 모델 | 소스 모델 | 점검 항목 수 |
-|------------|------------|------------|
-| Haiku 4.5 | Haiku 3, 3.5 | 14개 |
-| Sonnet 4.5 | Sonnet 4, Sonnet 3.7 | 15개 |
-| Sonnet 4.6 | Sonnet 4.5, Sonnet 4 | 19개 |
-| Opus 4.6 | Opus 4.5, Opus 4.1 | 26개 |
+In short: point it at your project, tell it which Claude version you're moving to, and get back a migrated codebase plus a pass/fail verdict backed by a report you can review.
 
-## 설치
+## Supported Targets
 
-### 1. 저장소 클론
+| `--target` | Source models |
+|---|---|
+| `haiku-4.5` | Haiku 3, 3.5 |
+| `sonnet-4.5` | Sonnet 4, 3.7 |
+| `sonnet-4.6` | Sonnet 4.5, 4 |
+| `opus-4.6` | Opus 4.5, 4.1 |
+
+---
+
+## 1. Prepare
+
+Before running, you need:
+
+1. **The project to migrate** — a local directory with Claude API calls (inline prompts or separate files both work).
+2. **`eval_cases.json`** — your test suite placed in that directory (see §3). Required for `eval` and `autopilot`.
+   - Must include at least one `"type": "regression"` case. Regression cases anchor behaviors that **must not break** (language, format, required phrases). Without them, the tool cannot verify the migration is safe.
+3. **Credentials** — an Anthropic API key, **or** a GCP project with Vertex AI access and `gcloud` authenticated.
+
+---
+
+## 2. Install
+
+**Requirements:** macOS or Linux. Python 3.12 and `uv` are installed automatically by the setup script — you do not need them beforehand.
 
 ```bash
 git clone <repo-url>
 cd claude-migration-agent
-```
-
-### 2. uv 환경 셋업
-
-```bash
-cd setup
-./create-uv-env.sh claude-migration-agent
-cd ..
-```
-
-이 스크립트가 다음을 자동 처리합니다:
-- uv 설치 확인 (없으면 자동 설치)
-- Python 3.12 가상환경 생성
-- 의존성 설치 (`claude-agent-sdk`, `anthropic` 등)
-- Jupyter 커널 등록
-- 루트 디렉토리에 심링크 생성
-
-### 3. API 키 설정
-
-```bash
+cd setup && ./create-uv-env.sh claude-migration-agent && cd ..
 cp .env.example .env
 ```
 
-`.env` 파일을 열고 Anthropic API 키를 입력합니다:
+Edit `.env`:
 
 ```
+# "api" or "vertex"
+BACKEND=api
+
+# Required when BACKEND=api
 ANTHROPIC_API_KEY=sk-ant-...
+
+# Required when BACKEND=vertex (leave blank otherwise)
+ANTHROPIC_VERTEX_PROJECT_ID=
+CLOUD_ML_REGION=us-east5
+
+AGENT_MODEL=claude-sonnet-4-6
+EVAL_MODEL=claude-sonnet-4-6
+MAX_EVAL_ITERATIONS=3
 ```
 
-## 사용법
+**What each `.env` variable does:**
 
-### Scan 모드: 코드 스캔 + 자동 수정
+| Variable | Purpose |
+|---|---|
+| `BACKEND` | `api` for Anthropic API, `vertex` for Google Vertex AI. |
+| `ANTHROPIC_API_KEY` | Your Anthropic API key. Required when `BACKEND=api`; ignored when `BACKEND=vertex`. |
+| `AGENT_MODEL` | Model that **runs this tool** — reads code, writes the report, applies fixes. |
+| `EVAL_MODEL` | Model used as **LLM-as-Judge** to grade eval outputs. |
+| `MAX_EVAL_ITERATIONS` | Maximum scan → fix → eval loops in `autopilot` before it gives up. |
 
-고객 프로젝트 디렉토리와 타겟 모델을 지정하면 자동으로 스캔합니다.
+### Using Vertex AI
+
+Change `BACKEND=vertex` in `.env`, run `gcloud auth application-default login`, and fill in these two variables:
+
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_VERTEX_PROJECT_ID` | Your GCP project ID. |
+| `CLOUD_ML_REGION` | Vertex region where your Claude models are enabled (e.g. `us-east5`, `europe-west1`, `asia-southeast1`). |
+
+Also change every model ID in `.env` and `eval_cases.json` to the `@` form — replace the hyphen before the date with `@`. Example: `claude-sonnet-4-6-20251015` → `claude-sonnet-4-6@20251015`. Use the exact snapshot date listed for the model on the [Anthropic docs](https://platform.claude.com/docs/en/about-claude/models). No code changes needed.
+
+---
+
+## 3. `eval_cases.json`
+
+A complete working example is included at [`customer-project/eval_cases.json`](customer-project/eval_cases.json) — copy it into your own project directory as a starting point and adjust the cases.
+
+**Location:** place the file in the directory you pass as `--project-path` when running `eval` or `autopilot`.
+
+```
+your-project/
+├── eval_cases.json     ← here
+├── app.py
+└── prompts/
+```
+
+**Fields:**
+
+| Field | Required | Purpose |
+|---|---|---|
+| `source_model` | yes | The customer's current production model ID. |
+| `target_model` | yes | The new model ID being migrated to. |
+| `system_prompt` | no | System prompt applied to both source and target calls. |
+| `cases[].id` | yes | Unique case identifier. |
+| `cases[].name` | yes | Short description (shown in console output). |
+| `cases[].type` | recommended | `regression` (must not break) or `improvement` (should improve). Autopilot requires at least one regression case. |
+| `cases[].input` | yes | The user message sent to both models. |
+| `cases[].expected_output` | yes | Reference answer used by the judge for keyword and quality scoring. |
+| `cases[].criteria` | no | Extra grading instructions for the judge. |
+
+Aim for 3–5 regression cases covering your load-bearing behaviors (language, output format, required phrases).
+
+**How the judge uses these fields:**
+
+For each case, `EVAL_MODEL` (the LLM-as-Judge) produces four scores:
+
+1. **Keyword check** — does the target output contain key terms/patterns from `expected_output`? (pass/fail)
+2. **Quality score** — target output rated 1–5 against `expected_output` (5 = perfect or better).
+3. **Comparison** — target output vs. source output: better / equal / worse.
+4. **Notes** — brief justification.
+
+`criteria` (if provided) is passed to the judge as additional grading instructions for that case.
+
+**Autopilot PASS condition:**
+
+Autopilot exits as soon as the judge emits `VERDICT: PASS` on its final line. The judge is instructed that **every case with `"type": "regression"` must pass** — a single regression failure blocks PASS. `improvement` cases do not block PASS. If verdict is FAIL, autopilot runs another scan → fix → eval iteration, up to `MAX_EVAL_ITERATIONS`.
+
+**Customizing the evaluation criteria:**
+
+If you need stricter or more permissive pass/fail rules (e.g. require quality score ≥ 4, reject any regression case that scored worse than source, only care about keyword check), edit [`src/prompts/evaluator.md`](src/prompts/evaluator.md). The judge follows this prompt for every case — change the grading instructions there to shift the criteria. For example:
+
+```
+A case is considered "pass" only when:
+  - keyword_check = pass
+  - quality_score >= 4
+  - comparison is "better" or "equal"
+
+Output `VERDICT: PASS` only if every regression case passes by this rule.
+```
+
+The final-line `VERDICT: PASS` / `VERDICT: FAIL` marker is how `main.py` decides whether to stop — do not change that marker unless you also update `main.py`.
+
+---
+
+## 4. Run
+
+> In every example below, replace `./customer-project` with the path to your own project directory. A sample project is included at `./customer-project/` for quick testing.
+
+### Scan + apply fixes (interactive)
 
 ```bash
-uv run python main.py scan --target haiku-4.5 /path/to/customer/project
+uv run python main.py scan --target haiku-4.5 --project-path ./customer-project
 ```
 
-**실행 플로우:**
+Scans the project, writes a report, then prompts `Apply fixes? (y/n)`. On `y`, files are backed up as `*_prev.*` and patched in place.
 
-1. 에이전트가 해당 디렉토리의 코드를 스캔
-2. 마이그레이션 리포트를 `report/` 디렉토리에 저장
-3. 터미널에 "Apply fixes? (y/n)" 확인
-4. `y` 입력 시 원본 파일을 `_prev` 접미사로 백업하고 코드 자동 수정
-5. `n` 입력 시 리포트만 남기고 종료
-
-**예시:**
+### Run evaluation only
 
 ```bash
-# Haiku 3 -> Haiku 4.5 마이그레이션
-uv run python main.py scan --target haiku-4.5 ./my-project
-
-# Sonnet 4.5 -> Sonnet 4.6 마이그레이션
-uv run python main.py scan --target sonnet-4.6 ./my-project
-
-# Opus 4.5 -> Opus 4.6 마이그레이션
-uv run python main.py scan --target opus-4.6 ./my-project
+uv run python main.py eval --target haiku-4.5 --project-path ./customer-project
 ```
 
-### Guide 모드: 대화형 Q&A
+Calls source and target models on each case, then has `EVAL_MODEL` grade them.
 
-마이그레이션에 대한 질문을 대화형으로 할 수 있습니다.
+### End-to-end (scan → fix → eval, loop until PASS)
 
 ```bash
-uv run python main.py guide --target sonnet-4.6
+uv run python main.py autopilot --target haiku-4.5 --project-path ./customer-project
+# or override the iteration cap for this run:
+uv run python main.py autopilot --target haiku-4.5 --project-path ./customer-project --max-iterations 5
 ```
 
-예시 질문:
-- "Sonnet 4.6에서 prefill이 제거되었다는데, 어떻게 대응해야 하나요?"
-- "effort 파라미터를 어떻게 설정해야 하나요?"
-- "우리 코드에서 temperature와 top_p를 동시에 쓰고 있는데 문제가 되나요?"
+Exits as soon as eval returns `VERDICT: PASS`, or after `MAX_EVAL_ITERATIONS` iterations.
 
-`exit`를 입력하면 종료됩니다.
+---
 
-### Eval 모드: 마이그레이션 전후 품질 비교
+## 5. Outputs
 
-구모델과 신모델의 출력을 자동 비교하고 LLM-as-Judge로 품질을 평가합니다.
+**Reports** — `report/<mode>_<target>_<timestamp>.md`
+- Scan: per-item findings with severity, file:line, current code, recommended fix, overall verdict
+- Eval: per-case keyword check, quality score 1–5, source-vs-target comparison, readiness assessment
+- Autopilot: both, one pair per iteration
 
-```bash
-uv run python main.py eval --target haiku-4.5 /path/to/eval/directory
-```
+**Backups** — the original of every modified file is kept with a `_prev` suffix (e.g. `app.py` → `app_prev.py`). Use `diff` to review or `mv` to roll back.
 
-**실행 플로우:**
+**Per-mode output:**
 
-1. `eval_cases.json`에서 테스트 케이스 로드
-2. 각 케이스를 소스 모델과 타겟 모델로 각각 호출
-3. LLM-as-Judge가 키워드 체크 + 품질 점수(1-5) + 비교 판정
-4. 결과 리포트를 `report/` 디렉토리에 저장
-
-#### eval_cases.json 작성 가이드
-
-테스트 케이스 파일을 아래 형식으로 작성합니다:
-
-```json
-{
-  "source_model": "claude-3-haiku-20240307",
-  "target_model": "claude-haiku-4-5-20251001",
-  "system_prompt": "You are a helpful assistant.",
-  "cases": [
-    {
-      "id": 1,
-      "name": "테스트 이름",
-      "type": "regression",
-      "input": "사용자 입력 텍스트",
-      "expected_output": "기대하는 출력",
-      "criteria": "평가 기준 (선택사항)"
-    }
-  ]
-}
-```
-
-**필드 설명:**
-
-| 필드 | 필수 | 설명 |
-|-------|------|------|
-| `source_model` | 예 | 현재 사용 중인 모델 ID |
-| `target_model` | 예 | 마이그레이션 목표 모델 ID |
-| `system_prompt` | 아니오 | 모든 케이스에 적용할 시스템 프롬프트 |
-| `cases[].id` | 예 | 케이스 번호 |
-| `cases[].name` | 예 | 케이스 설명 |
-| `cases[].type` | 예 | 테스트 타입 (아래 표 참고) |
-| `cases[].input` | 예 | 모델에 보낼 사용자 입력 |
-| `cases[].expected_output` | 예 | 기대하는 출력 (키워드 체크 및 LLM 평가 기준) |
-| `cases[].criteria` | 아니오 | 추가 평가 기준 (예: "한국어로 응답해야 함", "JSON 형식이어야 함") |
-
-**type 필드 설명:**
-
-| type | 설명 | 예시 |
-|------|------|------|
-| `regression` | **필수.** 현재 잘 동작하는 기능. 마이그레이션 후에도 반드시 동일하게 동작해야 함. 다른 항목 수정 시 이 케이스가 깨지면 실패 판정 | 기존 고객 대화, 핵심 비즈니스 로직, 다국어 응답 |
-| `improvement` | 마이그레이션으로 개선되길 기대하는 기능. 실패해도 전체 판정에 영향 적음 | 새 기능 활용, 성능 개선, 포맷 개선 |
-| `capability` | 신모델에서만 가능한 새 기능 테스트. 소스 모델에서는 실패해도 무방 | extended thinking, 64K output, adaptive thinking |
-
-> **중요:** autopilot 모드 사용 시 `regression` 타입의 케이스가 반드시 포함되어야 합니다.
-> 마이그레이션 수정으로 인해 기존 잘 되던 기능이 깨지는 것을 방지하는 것이 가장 중요합니다.
-
-**예제 시나리오:**
-
-```json
-{
-  "source_model": "claude-sonnet-4-5-20250929",
-  "target_model": "claude-sonnet-4-6",
-  "system_prompt": "You are a code review assistant.",
-  "cases": [
-    {
-      "id": 1,
-      "name": "Python 코드 리뷰",
-      "type": "regression",
-      "input": "Review this code: def add(a,b): return a+b",
-      "expected_output": "The function is correct but lacks type hints and docstring.",
-      "criteria": "Must identify missing type hints. Must not be sycophantic."
-    },
-    {
-      "id": 2,
-      "name": "보안 취약점 분석",
-      "type": "improvement",
-      "input": "Analyze this for security issues: query = f'SELECT * FROM users WHERE id={user_id}'",
-      "expected_output": "SQL injection vulnerability detected.",
-      "criteria": "Must identify SQL injection. Must suggest parameterized query as fix."
-    }
-  ]
-}
-```
-
-### Autopilot 모드: 스캔 → 수정 → 평가 자동 반복
-
-scan, fix, eval을 자동으로 반복하며, eval을 통과하면 종료합니다.
-
-```bash
-uv run python main.py autopilot --target haiku-4.5 ./my-project
-```
-
-**전제 조건:**
-- `eval_cases.json`이 프로젝트 디렉토리에 있어야 합니다
-- **regression 타입의 테스트 케이스가 반드시 포함되어야 합니다** (아래 type 설명 참고)
-
-**실행 플로우:**
-
-```
-[1/3] Scanning...     → 7 issues found
-[1/3] Fixing...       → 7 fixes applied
-[1/3] Evaluating...   → 1 regression failed (JSON formatting)
-[2/3] Scanning...     → 1 issue found
-[2/3] Fixing...       → prompt instruction added
-[2/3] Evaluating...   → all passed
-Done. 2 iterations.
-```
-
-최대 반복 횟수를 지정할 수 있습니다 (기본값: 3):
-
-```bash
-uv run python main.py autopilot --target sonnet-4.6 --max-iterations 5 ./my-project
-```
-
-## 리포트
-
-모든 리포트는 `report/` 디렉토리에 타임스탬프와 함께 저장됩니다:
-
+After `scan` (with fixes applied):
 ```
 report/
-├── scan_haiku-45_20260406_163000.md     # 스캔 리포트
-└── eval_haiku-45_20260406_163500.md     # eval 리포트
+  scan_haiku-45_20260414_104650.md
+customer-project/
+  app.py           # migrated
+  app_prev.py      # original
 ```
 
-## 고객이 준비해야 할 것
-
-### 필수
-- **코드 디렉토리**: Claude API를 사용하는 프로젝트 코드가 있는 디렉토리 경로
-- **타겟 모델**: 마이그레이션할 목표 모델 (haiku-4.5, sonnet-4.5, sonnet-4.6, opus-4.6)
-
-### 권장
-- **프롬프트 파일**: 시스템 프롬프트가 별도 파일로 관리되고 있다면, 코드 디렉토리에 포함시키면 에이전트가 함께 분석합니다
-- **eval_cases.json**: eval 모드 사용 시 필요. 위의 작성 가이드 참고
-
-## 프로젝트 구조
-
+After `eval` (read-only — no code changes):
 ```
-claude-migration-agent/
-├── main.py                     # CLI 엔트리포인트 (scan / guide / eval)
-├── .env.example                # API 키 템플릿
-├── .gitignore
-├── setup/                      # uv 환경 설정
-│   ├── pyproject.toml          # 의존성 정의
-│   ├── create-uv-env.sh        # 환경 셋업 스크립트
-│   └── .python-version         # Python 3.12
-├── src/
-│   └── prompts/                # 에이전트 프롬프트
-│       ├── scanner.md          # 스캔 모드 프롬프트
-│       ├── fixer.md            # 수정 모드 프롬프트
-│       ├── guide.md            # 가이드 모드 프롬프트
-│       ├── evaluator.md        # eval 모드 프롬프트
-│       └── template.py         # 프롬프트 로더
-├── report/                     # 스캔/eval 리포트 저장
-├── .claude/skills/             # 마이그레이션 지식
-│   ├── migrate-to-haiku-45/    # 12개 항목
-│   ├── migrate-to-sonnet-45/   # 12개 항목
-│   ├── migrate-to-sonnet-46/   # 19개 항목
-│   └── migrate-to-opus-46/     # 26개 항목
-│       ├── SKILL.md            # 마이그레이션 체크리스트
-│       └── references/         # 참고 자료
-└── test-project/               # 테스트용 샘플 코드
+report/
+  eval_haiku-45_20260414_104650.md
 ```
 
-## 참고 리소스
+After `autopilot` (one report pair per iteration until PASS):
+```
+report/
+  autopilot_scan_iter1_haiku-45_20260414_104650.md
+  autopilot_eval_iter1_haiku-45_20260414_105042.md
+customer-project/
+  app.py           # migrated
+  app_prev.py      # original
+```
 
-- [공식 마이그레이션 가이드](https://platform.claude.com/docs/en/about-claude/models/migration-guide)
-- [프롬프팅 베스트 프랙티스](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices)
-- [Prompt Improver](https://console.anthropic.com) — Anthropic Console에서 무료 사용 가능 (1-2분)
+---
+
+## 6. Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `BACKEND=api requires ANTHROPIC_API_KEY` | Set the key in `.env`. |
+| `BACKEND=vertex requires: ...` | Fill in `ANTHROPIC_VERTEX_PROJECT_ID` and `CLOUD_ML_REGION`, then `gcloud auth application-default login`. |
+| `'<target>' is not a supported migration target` | Use one of: `haiku-4.5`, `sonnet-4.5`, `sonnet-4.6`, `opus-4.6`. |
+| `eval_cases.json not found` | Place the file in the directory you pass as `--project-path`. |
+| `No regression test cases found` | Add at least one case with `"type": "regression"` — required for a safe verdict. |
+| Invalid model ID on Vertex | Use the `@` format in `.env` and `eval_cases.json` (e.g. `claude-sonnet-4-6@20251015`). Get the exact date from the [Anthropic models docs](https://platform.claude.com/docs/en/about-claude/models). |
+| Output looks frozen | The `⠋ Working...` spinner runs while the agent uses tools. Large scans take several minutes per phase. |

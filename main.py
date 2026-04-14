@@ -16,14 +16,58 @@ load_dotenv()
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORT_DIR = os.path.join(PROJECT_ROOT, "report")
 
+AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-sonnet-4-5-20250929")
+EVAL_MODEL = os.getenv("EVAL_MODEL", "claude-sonnet-4-5-20250929")
+MAX_EVAL_ITERATIONS = int(os.getenv("MAX_EVAL_ITERATIONS", "3"))
+
+
+BACKEND = os.getenv("BACKEND", "api").strip().lower()
+
+
+def use_vertex() -> bool:
+    return BACKEND == "vertex"
+
+
+if use_vertex():
+    os.environ["CLAUDE_CODE_USE_VERTEX"] = "1"
+
+
+def require_credentials() -> None:
+    if BACKEND not in ("api", "vertex"):
+        print(f"\n[ERROR] BACKEND must be 'api' or 'vertex', got '{BACKEND}'.")
+        print("Edit .env and set BACKEND=api or BACKEND=vertex.")
+        raise SystemExit(1)
+    if use_vertex():
+        missing = [
+            v for v in ("ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION")
+            if not os.getenv(v)
+        ]
+        if missing:
+            print(f"\n[ERROR] BACKEND=vertex requires: {', '.join(missing)}")
+            print("Set these in .env. See .env.example.")
+            raise SystemExit(1)
+        return
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        print("\n[ERROR] BACKEND=api requires ANTHROPIC_API_KEY.")
+        print("Set it in .env, or switch to BACKEND=vertex. See .env.example.")
+        raise SystemExit(1)
+
+
+def make_anthropic_client():
+    if use_vertex():
+        from anthropic import AnthropicVertex
+        return AnthropicVertex(
+            region=os.getenv("CLOUD_ML_REGION"),
+            project_id=os.getenv("ANTHROPIC_VERTEX_PROJECT_ID"),
+        )
+    return anthropic.Anthropic()
+
 TARGET_TO_SKILL = {
     "haiku-4.5": "migrate-to-haiku-45",
     "sonnet-4.5": "migrate-to-sonnet-45",
     "sonnet-4.6": "migrate-to-sonnet-46",
     "opus-4.6": "migrate-to-opus-46",
 }
-
-TARGET_MODELS = list(TARGET_TO_SKILL.keys())
 
 class ColoredStreamingCallback(StreamingStdOutCallbackHandler):
     COLORS = {
@@ -45,32 +89,79 @@ class ColoredStreamingCallback(StreamingStdOutCallbackHandler):
         print(f"{self.color_code}{token}{self.reset_code}", end="", flush=True)
 
 
-TOOL_LABELS = {
-    "Read": "Reading",
-    "Write": "Writing",
-    "Edit": "Editing",
-    "Glob": "Searching files",
-    "Grep": "Searching code",
-    "Bash": "Running command",
-    "Skill": "Loading skill",
+ANSI = {
+    'blue': '\033[94m',
+    'green': '\033[92m',
+    'yellow': '\033[93m',
+    'red': '\033[91m',
+    'purple': '\033[95m',
+    'cyan': '\033[96m',
+    'white': '\033[97m',
+    'bold': '\033[1m',
+    'reset': '\033[0m',
 }
 
 
-def _tool_detail(name: str, inp: dict) -> str:
-    if name in ("Read", "Write", "Edit") and "file_path" in inp:
-        return f" {os.path.basename(inp['file_path'])}"
-    elif name == "Bash" and "command" in inp:
-        cmd = inp["command"]
-        if len(cmd) > 60:
-            cmd = cmd[:60] + "..."
-        return f" `{cmd}`"
-    elif name == "Grep" and "pattern" in inp:
-        return f" '{inp['pattern']}'"
-    elif name == "Glob" and "pattern" in inp:
-        return f" {inp['pattern']}"
-    elif name == "Skill" and "skill" in inp:
-        return f" {inp['skill']}"
-    return ""
+def print_banner(title: str, subtitle: str = "", color: str = 'cyan') -> None:
+    c = ANSI[color]
+    b = ANSI['bold']
+    r = ANSI['reset']
+    bar = "=" * 60
+    print(f"\n{c}{b}{bar}{r}")
+    print(f"{c}{b}  {title}{r}")
+    if subtitle:
+        print(f"{c}  {subtitle}{r}")
+    print(f"{c}{b}{bar}{r}\n")
+
+
+def print_step(label: str, color: str = 'purple') -> None:
+    c = ANSI[color]
+    b = ANSI['bold']
+    r = ANSI['reset']
+    print(f"\n{c}{b}▶ {label}{r}\n")
+
+
+class Spinner:
+    FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+    def __init__(self, message: str = "Working", color: str = 'cyan'):
+        self.message = message
+        self.color = ANSI[color]
+        self.reset = ANSI['reset']
+        self._task = None
+        self._paused = False
+        self._stopped = False
+
+    async def _run(self):
+        i = 0
+        while not self._stopped:
+            if not self._paused:
+                frame = self.FRAMES[i % len(self.FRAMES)]
+                sys.stdout.write(f"\r{self.color}{frame} {self.message}...{self.reset}")
+                sys.stdout.flush()
+                i += 1
+            await asyncio.sleep(0.1)
+
+    def start(self):
+        self._task = asyncio.create_task(self._run())
+
+    def _clear_line(self):
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+    def pause(self):
+        if not self._paused:
+            self._paused = True
+            self._clear_line()
+
+    def resume(self):
+        self._paused = False
+
+    async def stop(self):
+        self._stopped = True
+        if self._task:
+            await self._task
+        self._clear_line()
 
 
 async def stream_query(prompt: str, options: ClaudeAgentOptions) -> str | None:
@@ -78,54 +169,40 @@ async def stream_query(prompt: str, options: ClaudeAgentOptions) -> str | None:
     options.include_partial_messages = True
     result_text = None
     in_text_block = False
-    current_tool_name = None
-    tool_input_json = ""
 
     callback_text = ColoredStreamingCallback('white')
-    callback_tool = ColoredStreamingCallback('yellow')
+    spinner = Spinner("Working")
+    spinner.start()
 
-    async for msg in query(prompt=prompt, options=options):
-        if isinstance(msg, StreamEvent):
-            event = msg.event
-            etype = event.get("type", "")
+    try:
+        async for msg in query(prompt=prompt, options=options):
+            if isinstance(msg, StreamEvent):
+                event = msg.event
+                etype = event.get("type", "")
 
-            if etype == "content_block_start":
-                block = event.get("content_block", {})
-                if block.get("type") == "tool_use":
+                if etype == "content_block_start":
+                    block = event.get("content_block", {})
+                    if block.get("type") == "text":
+                        spinner.pause()
+                        in_text_block = True
+
+                elif etype == "content_block_delta":
+                    delta = event.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        callback_text.on_llm_new_token(delta.get("text", ""))
+
+                elif etype == "content_block_stop":
                     if in_text_block:
                         print(flush=True)
                         in_text_block = False
-                    current_tool_name = block.get("name", "")
-                    tool_input_json = ""
-                elif block.get("type") == "text":
-                    in_text_block = True
+                        spinner.resume()
 
-            elif etype == "content_block_delta":
-                delta = event.get("delta", {})
-                if delta.get("type") == "text_delta":
-                    callback_text.on_llm_new_token(delta.get("text", ""))
-                elif delta.get("type") == "input_json_delta" and current_tool_name:
-                    tool_input_json += delta.get("partial_json", "")
-
-            elif etype == "content_block_stop":
-                if current_tool_name:
-                    label = TOOL_LABELS.get(current_tool_name, current_tool_name)
-                    detail = ""
-                    try:
-                        inp = json.loads(tool_input_json)
-                        detail = _tool_detail(current_tool_name, inp)
-                    except (json.JSONDecodeError, KeyError):
-                        pass
-                    callback_tool.on_llm_new_token(f"\n  [tool-use] {label}{detail}\n")
-                    current_tool_name = None
-                    tool_input_json = ""
-                elif in_text_block:
-                    in_text_block = False
-
-        elif isinstance(msg, ResultMessage):
-            if in_text_block:
-                print(flush=True)
-            result_text = msg.result
+            elif isinstance(msg, ResultMessage):
+                if in_text_block:
+                    print(flush=True)
+                result_text = msg.result
+    finally:
+        await spinner.stop()
 
     return result_text
 
@@ -138,12 +215,19 @@ def get_report_path(prefix: str, target_model: str) -> str:
 
 
 async def run_scan(target_model: str, project_path: str):
+    print_banner(
+        "SCAN MODE",
+        f"Target: {target_model}  |  Agent model: {AGENT_MODEL}  |  Project: {project_path}",
+        color='cyan',
+    )
+    print_step("Step 1/2: Scanning code for migration issues", color='purple')
     report_path = get_report_path("scan", target_model)
     system_prompt = apply_prompt_template("scanner", {
         "TARGET_MODEL": target_model,
         "REPORT_PATH": report_path,
     })
     scan_options = ClaudeAgentOptions(
+        model=AGENT_MODEL,
         allowed_tools=["Read", "Glob", "Grep", "Skill", "Write"],
         system_prompt=system_prompt,
         setting_sources=["project"],
@@ -168,11 +252,12 @@ async def run_scan(target_model: str, project_path: str):
         print("Fixes not applied. You can review the report and re-run later.")
         return
 
-    print("\nApplying fixes...")
+    print_step("Step 2/2: Applying fixes to source code", color='purple')
     fix_prompt = apply_prompt_template("fixer", {
         "TARGET_MODEL": target_model
     })
     fix_options = ClaudeAgentOptions(
+        model=AGENT_MODEL,
         allowed_tools=["Read", "Glob", "Grep", "Skill", "Edit", "Write", "Bash"],
         system_prompt=fix_prompt,
         setting_sources=["project"],
@@ -188,48 +273,23 @@ async def run_scan(target_model: str, project_path: str):
     await stream_query(prompt=fix_command, options=fix_options)
 
 
-async def run_guide(target_model: str):
-    skill_name = TARGET_TO_SKILL[target_model]
-    system_prompt = apply_prompt_template("guide", {
-        "TARGET_MODEL": target_model,
-        "SKILL_NAME": skill_name,
-    })
-    options = ClaudeAgentOptions(
-        allowed_tools=["Read", "Glob", "Grep", "Skill"],
-        system_prompt=system_prompt,
-        setting_sources=["project"],
-        permission_mode="acceptEdits",
-        cwd=PROJECT_ROOT,
-    )
-    print(f"Claude Migration Guide - Target: {target_model} (type 'exit' to quit)")
-    while True:
-        user_input = input("\n> ")
-        if user_input.lower() == "exit":
-            break
-        await stream_query(prompt=user_input, options=options)
-
-
 async def run_eval(target_model: str, project_path: str):
     eval_path = os.path.join(project_path, "eval_cases.json")
-    if not os.path.exists(eval_path):
-        print(f"\n[ERROR] eval_cases.json not found in {project_path}")
-        print("Create an eval_cases.json file with your test cases. See README.md for format.")
-        raise SystemExit(1)
-
-    with open(eval_path, 'r') as f:
-        eval_data = json.load(f)
+    eval_data = validate_eval_cases(eval_path)
 
     source_model = eval_data["source_model"]
     target_model_id = eval_data["target_model"]
     system_prompt = eval_data.get("system_prompt", "")
     cases = eval_data["cases"]
 
-    print(f"\nRunning {len(cases)} eval cases...")
-    print(f"Source: {source_model}")
-    print(f"Target: {target_model_id}")
-    print()
+    print_banner(
+        "EVAL MODE",
+        f"Source: {source_model}  →  Target: {target_model_id}  |  Eval model: {EVAL_MODEL}",
+        color='cyan',
+    )
+    print_step(f"Step 1/2: Running {len(cases)} eval cases on both models", color='purple')
 
-    client = anthropic.Anthropic()
+    client = make_anthropic_client()
     results = []
 
     for case in cases:
@@ -257,7 +317,7 @@ async def run_eval(target_model: str, project_path: str):
         })
         print("done")
 
-    print("\nAll cases collected. Running LLM-as-Judge evaluation...")
+    print_step("Step 2/2: LLM-as-Judge evaluation", color='purple')
 
     report_path = get_report_path("eval", target_model)
     eval_prompt = apply_prompt_template("evaluator", {
@@ -265,6 +325,7 @@ async def run_eval(target_model: str, project_path: str):
         "REPORT_PATH": report_path,
     })
     eval_options = ClaudeAgentOptions(
+        model=EVAL_MODEL,
         allowed_tools=["Write"],
         system_prompt=eval_prompt,
         setting_sources=["project"],
@@ -317,27 +378,28 @@ async def run_autopilot(target_model: str, project_path: str, max_iterations: in
     eval_path = os.path.join(project_path, "eval_cases.json")
     eval_data = validate_eval_cases(eval_path)
 
-    print(f"\n=== Autopilot Mode ===")
-    print(f"Target: {target_model}")
-    print(f"Max iterations: {max_iterations}")
-    print(f"Eval cases: {len(eval_data['cases'])}")
     regression_count = sum(1 for c in eval_data['cases'] if c.get('type') == 'regression')
-    print(f"Regression cases: {regression_count}")
-    print()
+    subtitle = (
+        f"Target: {target_model}  |  Agent: {AGENT_MODEL}  |  Eval: {EVAL_MODEL}  |  "
+        f"Max iterations: {max_iterations}  |  "
+        f"Eval cases: {len(eval_data['cases'])} ({regression_count} regression)"
+    )
+    print_banner("AUTOPILOT MODE", subtitle, color='cyan')
 
     skill_name = TARGET_TO_SKILL[target_model]
 
     for iteration in range(1, max_iterations + 1):
-        print(f"\n--- Iteration {iteration}/{max_iterations} ---")
+        print_banner(f"Iteration {iteration}/{max_iterations}", "scan → fix → eval", color='blue')
 
         # Step 1: Scan
-        print(f"\n[{iteration}/{max_iterations}] Scanning...")
+        print_step(f"[Iter {iteration}] Step 1/3: Scanning", color='purple')
         report_path = get_report_path(f"autopilot_scan_iter{iteration}", target_model)
         scan_prompt = apply_prompt_template("scanner", {
             "TARGET_MODEL": target_model,
             "REPORT_PATH": report_path,
         })
         scan_options = ClaudeAgentOptions(
+            model=AGENT_MODEL,
             allowed_tools=["Read", "Glob", "Grep", "Skill", "Write"],
             system_prompt=scan_prompt,
             setting_sources=["project"],
@@ -350,11 +412,12 @@ async def run_autopilot(target_model: str, project_path: str, max_iterations: in
         )
 
         # Step 2: Fix
-        print(f"\n[{iteration}/{max_iterations}] Applying fixes...")
+        print_step(f"[Iter {iteration}] Step 2/3: Applying fixes", color='purple')
         fix_prompt = apply_prompt_template("fixer", {
             "TARGET_MODEL": target_model
         })
         fix_options = ClaudeAgentOptions(
+            model=AGENT_MODEL,
             allowed_tools=["Read", "Glob", "Grep", "Skill", "Edit", "Write", "Bash"],
             system_prompt=fix_prompt,
             setting_sources=["project"],
@@ -369,13 +432,13 @@ async def run_autopilot(target_model: str, project_path: str, max_iterations: in
         await stream_query(prompt=fix_command, options=fix_options)
 
         # Step 3: Eval
-        print(f"\n[{iteration}/{max_iterations}] Evaluating...")
+        print_step(f"[Iter {iteration}] Step 3/3: Evaluating", color='purple')
         source_model = eval_data["source_model"]
         target_model_id = eval_data["target_model"]
         system_prompt = eval_data.get("system_prompt", "")
         cases = eval_data["cases"]
 
-        client = anthropic.Anthropic()
+        client = make_anthropic_client()
         results = []
         for case in cases:
             print(f"  [{case['id']}] {case['name']}... ", end="", flush=True)
@@ -405,6 +468,7 @@ async def run_autopilot(target_model: str, project_path: str, max_iterations: in
             "REPORT_PATH": eval_report_path,
         })
         eval_options = ClaudeAgentOptions(
+            model=EVAL_MODEL,
             allowed_tools=["Write"],
             system_prompt=eval_prompt,
             setting_sources=["project"],
@@ -458,32 +522,28 @@ if __name__ == "__main__":
     scan_p = sub.add_parser("scan", help="Scan code for migration issues")
     scan_p.add_argument("--target", required=True, type=validate_target,
                         help="Target model to migrate to")
-    scan_p.add_argument("path", help="Path to project directory")
-
-    guide_p = sub.add_parser("guide", help="Interactive migration guide")
-    guide_p.add_argument("--target", required=True, type=validate_target,
-                         help="Target model to migrate to")
+    scan_p.add_argument("--project-path", required=True, help="Path to project directory")
 
     eval_p = sub.add_parser("eval", help="Run migration eval cases")
     eval_p.add_argument("--target", required=True, type=validate_target,
                         help="Target model to migrate to")
-    eval_p.add_argument("path", help="Path to directory containing eval_cases.json")
+    eval_p.add_argument("--project-path", required=True, help="Path to directory containing eval_cases.json")
 
     auto_p = sub.add_parser("autopilot", help="Scan, fix, eval in a loop until pass")
     auto_p.add_argument("--target", required=True, type=validate_target,
                         help="Target model to migrate to")
-    auto_p.add_argument("--max-iterations", type=int, default=3,
-                        help="Maximum scan-fix-eval iterations (default: 3)")
-    auto_p.add_argument("path", help="Path to project directory (must contain eval_cases.json)")
+    auto_p.add_argument("--max-iterations", type=int, default=MAX_EVAL_ITERATIONS,
+                        help=f"Maximum scan-fix-eval iterations (default: {MAX_EVAL_ITERATIONS} from MAX_EVAL_ITERATIONS env)")
+    auto_p.add_argument("--project-path", required=True, help="Path to project directory (must contain eval_cases.json)")
 
     args = parser.parse_args()
-    if args.command == "scan":
-        asyncio.run(run_scan(args.target, args.path))
-    elif args.command == "guide":
-        asyncio.run(run_guide(args.target))
-    elif args.command == "eval":
-        asyncio.run(run_eval(args.target, args.path))
-    elif args.command == "autopilot":
-        asyncio.run(run_autopilot(args.target, args.path, args.max_iterations))
-    else:
+    if args.command is None:
         parser.print_help()
+        raise SystemExit(0)
+    require_credentials()
+    if args.command == "scan":
+        asyncio.run(run_scan(args.target, args.project_path))
+    elif args.command == "eval":
+        asyncio.run(run_eval(args.target, args.project_path))
+    elif args.command == "autopilot":
+        asyncio.run(run_autopilot(args.target, args.project_path, args.max_iterations))

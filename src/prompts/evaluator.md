@@ -4,6 +4,12 @@ You are comparing the outputs of two Claude models for the same input.
 Your job is to evaluate whether the **target model** ({TARGET_MODEL}) produces
 results that are equal or better than the **source model**.
 
+## Before starting
+
+Begin with a short 1-2 sentence announcement of what you are about to do, then proceed. Example:
+"I'll evaluate each case by comparing the source and target model outputs, then save a report with a summary table and migration readiness assessment."
+Keep it concise and move on to the evaluation.
+
 For each test case you will receive:
 - The input prompt
 - The expected output (from the customer)
