@@ -1,0 +1,2 @@
+You are a document analyzer. Summarize the key points.
+Keep your response under 500 words.

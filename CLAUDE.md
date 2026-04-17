@@ -87,15 +87,22 @@ claude-migration-agent/
 │   └── migrate-to-opus-46/     # 26개 Item
 │       ├── SKILL.md
 │       └── references/
-└── customer-project/               # 테스트용 샘플 코드
-    ├── sample_app.py           # Haiku 3 / Sonnet 4 코드
-    ├── sample_app_46.py        # Sonnet 4.5 / Opus 4.5 코드
-    ├── eval_cases.json         # eval 테스트 케이스 예제
-    └── prompts/                # 외부 프롬프트 파일 (코드에서 로드)
-        ├── system_prompt.txt       # Haiku 3용 시스템 프롬프트
-        ├── tool_use_prompt.txt     # Haiku 3용 도구 사용 프롬프트
-        ├── agent_system_prompt.txt # Sonnet 4.5용 에이전트 프롬프트 (anti-laziness 포함)
-        └── analysis_prompt.txt     # Sonnet 4.5용 분석 프롬프트 (JSON prefill 패턴)
+│           └── platform-ids.md # 백엔드별(API/Vertex/Bedrock) 모델 ID + 보존 규칙
+├── customer-project/               # 테스트용 샘플 (Anthropic API)
+│   ├── sample_app.py           # Haiku 3 / Sonnet 4 코드
+│   ├── sample_app_46.py        # Sonnet 4.5 / Opus 4.5 코드
+│   ├── eval_cases.json         # eval 테스트 케이스 예제
+│   └── prompts/                # 외부 프롬프트 파일 (코드에서 로드)
+│       ├── system_prompt.txt       # Haiku 3용 시스템 프롬프트
+│       ├── tool_use_prompt.txt     # Haiku 3용 도구 사용 프롬프트
+│       ├── agent_system_prompt.txt # Sonnet 4.5용 에이전트 프롬프트 (anti-laziness 포함)
+│       └── analysis_prompt.txt     # Sonnet 4.5용 분석 프롬프트 (JSON prefill 패턴)
+└── customer-project-vertex/        # 테스트용 샘플 (Vertex AI, base_url 프록시)
+    ├── .env.example
+    ├── config.py               # ANTHROPIC_VERTEX_* 로드 (.env)
+    ├── sample_app.py           # AnthropicVertex(project_id, region, base_url=...)
+    ├── eval_cases.json         # @YYYYMMDD 모델 ID
+    └── prompts/
 ```
 
 ## 개발 진행 상황
@@ -139,11 +146,15 @@ claude-migration-agent/
 - [x] README에 Customizing evaluation criteria 섹션 (Judge 프롬프트 수정 방법 + VERDICT 마커 계약 설명)
 - [x] customer-project 샘플 원상복구 (Haiku 3 → Haiku 4.5 시나리오 재현 가능하도록)
 - [x] 플랫폼 전제조건(macOS/Linux) + Vertex `@YYYYMMDD` 포맷 안내 README 명시
+- [x] 백엔드 보존: scanner.md/fixer.md에 Vertex/Bedrock 감지 + 클라이언트/env/base_url 보존 규칙
+- [x] 4개 스킬 모두 `references/platform-ids.md` 추가 (백엔드별 모델 ID 테이블)
+- [x] `customer-project-vertex/` 샘플 프로젝트 추가 (AnthropicVertex + base_url 프록시)
+- [x] `check_eval_backend_match()`: eval_cases.json 모델 ID 포맷과 BACKEND 불일치 시 사전 에러
 
 ### 남은 작업 (다음 세션)
 
 - [ ] 실제 고객 프로젝트(FSI)로 end-to-end 테스트
-- [ ] Vertex 실제 GCP 계정으로 인증 → scan/eval 검증
+- [ ] Vertex 실제 GCP 계정으로 인증 → customer-project-vertex로 scan/eval end-to-end 검증
 - [ ] eval 판정 엄격도 조정 옵션 필요성 검토 (현재는 `evaluator.md` 수동 편집으로만 가능)
 - [ ] 대용량 프로젝트에서 성능 측정 (scan 시간, 토큰 소모)
 

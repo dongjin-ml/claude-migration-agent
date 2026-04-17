@@ -34,6 +34,8 @@ model = "claude-opus-4-1-20250805"   # Before (from Opus 4.1)
 model = "claude-opus-4-6"            # After
 ```
 
+On Vertex AI or Bedrock the alias does not apply — use the dated snapshot (e.g. `claude-opus-4-6@<YYYYMMDD>` on Vertex). See `references/platform-ids.md` for the correct ID per backend, and never change the client class.
+
 ---
 
 ### Item 2: Prefill Removal [Required] `API` `Prompt` | All sources

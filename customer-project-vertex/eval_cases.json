@@ -1,0 +1,31 @@
+{
+  "source_model": "claude-3-haiku@20240307",
+  "target_model": "claude-haiku-4-5@20251001",
+  "system_prompt": "You are a helpful document analyzer.",
+  "cases": [
+    {
+      "id": 1,
+      "name": "Document summarization",
+      "type": "regression",
+      "input": "Summarize the following: Cloud computing enables on-demand access to shared computing resources including servers, storage, and applications over the internet.",
+      "expected_output": "Cloud computing provides on-demand access to shared resources like servers, storage, and apps via the internet.",
+      "criteria": "Must mention on-demand access, shared resources, and internet. Should be concise."
+    },
+    {
+      "id": 2,
+      "name": "Korean response",
+      "type": "regression",
+      "input": "Explain what an API is in Korean.",
+      "expected_output": "API is Application Programming Interface.",
+      "criteria": "Must respond in Korean. Must explain API accurately."
+    },
+    {
+      "id": 3,
+      "name": "JSON output format",
+      "type": "improvement",
+      "input": "Return the sentiment of 'I love this product' as JSON with fields: sentiment, confidence.",
+      "expected_output": "{\"sentiment\": \"positive\", \"confidence\": 0.95}",
+      "criteria": "Must return valid JSON. Must contain sentiment and confidence fields. Sentiment must be positive."
+    }
+  ]
+}

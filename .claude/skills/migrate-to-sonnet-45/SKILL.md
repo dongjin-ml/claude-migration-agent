@@ -31,6 +31,8 @@ model = "claude-3-7-sonnet-20250219"     # Before (Sonnet 3.7)
 model = "claude-sonnet-4-5-20250929"     # After
 ```
 
+On Vertex AI or Bedrock the model ID format differs (e.g. `claude-sonnet-4-5@20250929` on Vertex). See `references/platform-ids.md` for the correct ID per backend, and never change the client class.
+
 ---
 
 ### Item 2: Sampling Parameters 🔴 `API`

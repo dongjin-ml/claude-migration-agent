@@ -33,6 +33,8 @@ model = "claude-haiku-4-5-20251001"    # After
 Also note the intermediate version if relevant:
 - Haiku 3.5: `claude-3-5-haiku-20241022`
 
+On Vertex AI or Bedrock the model ID format differs (e.g. `claude-haiku-4-5@20251001` on Vertex). See `references/platform-ids.md` for the correct ID per backend, and never change the client class.
+
 ---
 
 ### Item 2: Sampling Parameters 🔴 `API`

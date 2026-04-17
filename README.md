@@ -81,6 +81,8 @@ Change `BACKEND=vertex` in `.env`, run `gcloud auth application-default login`, 
 
 Also change every model ID in `.env` and `eval_cases.json` to the `@` form — replace the hyphen before the date with `@`. Example: `claude-sonnet-4-6-20251015` → `claude-sonnet-4-6@20251015`. Use the exact snapshot date listed for the model on the [Anthropic docs](https://platform.claude.com/docs/en/about-claude/models). No code changes needed.
 
+**Backend preservation in your code.** The scanner auto-detects whether your project uses the direct Anthropic API, Vertex AI, or Bedrock (by inspecting client imports, constructor arguments such as `base_url`, and environment variables anywhere in the project). The fixer preserves that backend exactly — it will only update the model ID string in the format your backend expects, and will never change `AnthropicVertex(...)`, `ANTHROPIC_VERTEX_BASE_URL`, region, or auth settings.
+
 ---
 
 ## 3. `eval_cases.json`
@@ -146,7 +148,7 @@ The final-line `VERDICT: PASS` / `VERDICT: FAIL` marker is how `main.py` decides
 
 ## 4. Run
 
-> In every example below, replace `./customer-project` with the path to your own project directory. A sample project is included at `./customer-project/` for quick testing.
+> In every example below, replace `./customer-project` with the path to your own project directory. Two sample projects are included for quick testing: `./customer-project/` (direct Anthropic API) and `./customer-project-vertex/` (Google Vertex AI with proxy `base_url`).
 
 ### Scan + apply fixes (interactive)
 
@@ -223,5 +225,6 @@ customer-project/
 | `'<target>' is not a supported migration target` | Use one of: `haiku-4.5`, `sonnet-4.5`, `sonnet-4.6`, `opus-4.6`. |
 | `eval_cases.json not found` | Place the file in the directory you pass as `--project-path`. |
 | `No regression test cases found` | Add at least one case with `"type": "regression"` — required for a safe verdict. |
+| `eval_cases.json uses Vertex model IDs ... but .env has BACKEND=api` | Your project runs on Vertex, so the agent must too. Set `BACKEND=vertex` in `.env` (and the Vertex variables) so eval calls go through your Vertex endpoint. |
 | Invalid model ID on Vertex | Use the `@` format in `.env` and `eval_cases.json` (e.g. `claude-sonnet-4-6@20251015`). Get the exact date from the [Anthropic models docs](https://platform.claude.com/docs/en/about-claude/models). |
 | Output looks frozen | The `⠋ Working...` spinner runs while the agent uses tools. Large scans take several minutes per phase. |

@@ -62,6 +62,32 @@ def make_anthropic_client():
         )
     return anthropic.Anthropic()
 
+
+def check_eval_backend_match(source_model: str, target_model: str) -> None:
+    """Abort if eval_cases.json model IDs don't match the agent's BACKEND.
+
+    eval must run on the customer's actual backend (FSI customers on Vertex
+    may have no direct API access). A format mismatch means .env is wrong.
+    """
+    looks_vertex = "@" in source_model or "@" in target_model
+    if looks_vertex and not use_vertex():
+        print(
+            "\n[ERROR] eval_cases.json uses Vertex model IDs (e.g. "
+            f"'{source_model}') but .env has BACKEND=api.\n"
+            "Set BACKEND=vertex (and ANTHROPIC_VERTEX_PROJECT_ID / "
+            "CLOUD_ML_REGION / ANTHROPIC_VERTEX_BASE_URL) so eval runs on "
+            "the customer's backend."
+        )
+        sys.exit(1)
+    if not looks_vertex and use_vertex():
+        print(
+            "\n[ERROR] eval_cases.json uses Anthropic API model IDs (e.g. "
+            f"'{source_model}') but .env has BACKEND=vertex.\n"
+            "Either set BACKEND=api, or rewrite eval_cases.json model IDs "
+            "in Vertex format (claude-...@YYYYMMDD)."
+        )
+        sys.exit(1)
+
 TARGET_TO_SKILL = {
     "haiku-4.5": "migrate-to-haiku-45",
     "sonnet-4.5": "migrate-to-sonnet-45",
@@ -279,6 +305,7 @@ async def run_eval(target_model: str, project_path: str):
 
     source_model = eval_data["source_model"]
     target_model_id = eval_data["target_model"]
+    check_eval_backend_match(source_model, target_model_id)
     system_prompt = eval_data.get("system_prompt", "")
     cases = eval_data["cases"]
 
@@ -377,6 +404,7 @@ def validate_eval_cases(eval_path: str):
 async def run_autopilot(target_model: str, project_path: str, max_iterations: int = 3):
     eval_path = os.path.join(project_path, "eval_cases.json")
     eval_data = validate_eval_cases(eval_path)
+    check_eval_backend_match(eval_data["source_model"], eval_data["target_model"])
 
     regression_count = sum(1 for c in eval_data['cases'] if c.get('type') == 'regression')
     subtitle = (
