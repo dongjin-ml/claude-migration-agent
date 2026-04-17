@@ -93,6 +93,7 @@ TARGET_TO_SKILL = {
     "sonnet-4.5": "migrate-to-sonnet-45",
     "sonnet-4.6": "migrate-to-sonnet-46",
     "opus-4.6": "migrate-to-opus-46",
+    "opus-4.7": "migrate-to-opus-47",
 }
 
 class ColoredStreamingCallback(StreamingStdOutCallbackHandler):

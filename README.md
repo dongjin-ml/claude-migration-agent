@@ -17,6 +17,7 @@ In short: point it at your project, tell it which Claude version you're moving t
 | `sonnet-4.5` | Sonnet 4, 3.7 |
 | `sonnet-4.6` | Sonnet 4.5, 4 |
 | `opus-4.6` | Opus 4.5, 4.1 |
+| `opus-4.7` | Opus 4.6, 4.5 |
 
 ---
 
@@ -222,7 +223,7 @@ customer-project/
 |---|---|
 | `BACKEND=api requires ANTHROPIC_API_KEY` | Set the key in `.env`. |
 | `BACKEND=vertex requires: ...` | Fill in `ANTHROPIC_VERTEX_PROJECT_ID` and `CLOUD_ML_REGION`, then `gcloud auth application-default login`. |
-| `'<target>' is not a supported migration target` | Use one of: `haiku-4.5`, `sonnet-4.5`, `sonnet-4.6`, `opus-4.6`. |
+| `'<target>' is not a supported migration target` | Use one of: `haiku-4.5`, `sonnet-4.5`, `sonnet-4.6`, `opus-4.6`, `opus-4.7`. |
 | `eval_cases.json not found` | Place the file in the directory you pass as `--project-path`. |
 | `No regression test cases found` | Add at least one case with `"type": "regression"` — required for a safe verdict. |
 | `eval_cases.json uses Vertex model IDs ... but .env has BACKEND=api` | Your project runs on Vertex, so the agent must too. Set `BACKEND=vertex` in `.env` (and the Vertex variables) so eval calls go through your Vertex endpoint. |

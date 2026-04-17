@@ -393,7 +393,7 @@ Review pricing impact. Opus 4.6 pricing:
 
 | Model | Input (per M tokens) | Output (per M tokens) |
 |---|---|---|
-| Opus 4.6 | $15 | $75 |
+| Opus 4.6 | $5.00 | $25.00 |
 
 ---
 

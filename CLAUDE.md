@@ -58,6 +58,7 @@ PASS 판정: Judge가 마지막 줄에 `VERDICT: PASS` 출력 시 종료. regres
 | sonnet-4.5 | `migrate-to-sonnet-45` | 15개 | 완료 |
 | sonnet-4.6 | `migrate-to-sonnet-46` | 19개 | 완료 |
 | opus-4.6 | `migrate-to-opus-46` | 26개 | 완료 |
+| opus-4.7 | `migrate-to-opus-47` | 24개 | 완료 |
 
 ## 프로젝트 구조
 
@@ -84,7 +85,8 @@ claude-migration-agent/
 │   ├── migrate-to-haiku-45/    # 14개 Item
 │   ├── migrate-to-sonnet-45/   # 15개 Item
 │   ├── migrate-to-sonnet-46/   # 19개 Item
-│   └── migrate-to-opus-46/     # 26개 Item
+│   ├── migrate-to-opus-46/     # 26개 Item
+│   └── migrate-to-opus-47/     # 24개 Item
 │       ├── SKILL.md
 │       └── references/
 │           └── platform-ids.md # 백엔드별(API/Vertex/Bedrock) 모델 ID + 보존 규칙
@@ -150,6 +152,7 @@ claude-migration-agent/
 - [x] 4개 스킬 모두 `references/platform-ids.md` 추가 (백엔드별 모델 ID 테이블)
 - [x] `customer-project-vertex/` 샘플 프로젝트 추가 (AnthropicVertex + base_url 프록시)
 - [x] `check_eval_backend_match()`: eval_cases.json 모델 ID 포맷과 BACKEND 불일치 시 사전 에러
+- [x] `migrate-to-opus-47` 스킬 추가 (24개 Item, 공식 마이그레이션 가이드 기준) + TARGET_TO_SKILL 등록
 
 ### 남은 작업 (다음 세션)
 
